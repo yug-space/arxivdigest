@@ -4,9 +4,7 @@ from datetime import datetime, timedelta
 
 class ArxivFetcher:
     def __init__(self):
-        """Initialize the ArXiv client."""
-        self.client = arxiv.Client()
-        
+        """Initialize the ArXiv categories."""
         # Define arXiv categories of interest
         self.categories = {
             "cs.LG": "Machine Learning",
@@ -40,17 +38,19 @@ class ArxivFetcher:
         # Fetch 5x more papers initially to ensure we have enough new ones after filtering
         initial_max_results = max_results * 5
         
-        search = arxiv.Search(
-            query=f"cat:{category}",
-            max_results=initial_max_results,
-            sort_by=arxiv.SortCriterion.SubmittedDate,
-            sort_order=arxiv.SortOrder.Descending
-        )
-        
         try:
             print(f"  Fetching papers for {category}...")
             results = []
-            for paper in self.client.results(search):
+            
+            # Use arxiv.query instead of Search for version 1.4.7
+            papers = arxiv.query(
+                query=f"cat:{category}",
+                max_results=initial_max_results,
+                sort_by="submittedDate",
+                sort_order="descending"
+            )
+            
+            for paper in papers:
                 # Some papers might not have published date
                 if not hasattr(paper, 'published'):
                     continue
