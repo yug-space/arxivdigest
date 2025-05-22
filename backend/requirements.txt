@@ -1,0 +1,6 @@
+arxiv==1.4.7
+openai==1.12.0
+fastapi
+uvicorn
+pymongo 
+PyPDF2
