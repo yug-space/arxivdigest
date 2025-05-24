@@ -82,11 +82,11 @@ export function CategoryList() {
         </div>
       )}
       
-      <div className="relative">
+      <div className="relative outline outline-none rounded-md">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search categories..."
-          className="pl-10 backdrop-blur-sm bg-card/50 border-muted/40"
+          className="pl-10 bg-background/50 outline-none"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />

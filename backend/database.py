@@ -6,7 +6,7 @@ import os
 # Load environment variables
 
 # MongoDB Configuration
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = os.getenv("MONGODB_URI") 
 
 # Create mock MongoDB collections for fallback when real MongoDB is not available
 class MockCollection:
