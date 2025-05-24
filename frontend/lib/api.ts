@@ -26,6 +26,12 @@ export interface Paper {
   summary_sections: string;
   generation_date: string;
   processed_date: string;
+  pdf_analysis?: {
+    pdf_path: string;
+    num_pages: number;
+    summary: string;
+    analysis_date: string;
+  };
 }
 
 export interface Category {

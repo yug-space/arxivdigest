@@ -42,15 +42,16 @@ class ArxivFetcher:
             print(f"  Fetching papers for {category}...")
             results = []
             
-            # Use arxiv.query instead of Search for version 1.4.7
-            papers = arxiv.query(
+            # Use the newer Client API instead of deprecated Search.results()
+            client = arxiv.Client()
+            search = arxiv.Search(
                 query=f"cat:{category}",
                 max_results=initial_max_results,
-                sort_by="submittedDate",
-                sort_order="descending"
+                sort_by=arxiv.SortCriterion.SubmittedDate,
+                sort_order=arxiv.SortOrder.Descending
             )
             
-            for paper in papers:
+            for paper in client.results(search):
                 # Some papers might not have published date
                 if not hasattr(paper, 'published'):
                     continue
@@ -99,4 +100,4 @@ class ArxivFetcher:
     
     def get_category_name(self, category_code: str) -> str:
         """Get the human-readable name for a category code."""
-        return self.categories.get(category_code, "Unknown Category")
+        return self.categories.get(category_code, "Unknown Category") 

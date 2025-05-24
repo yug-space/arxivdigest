@@ -3,14 +3,22 @@ import argparse
 import datetime
 import asyncio
 from typing import Dict, List, Any, Set
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import re # For slugify
 from bson import ObjectId
 import time
+import urllib.request
+from PyPDF2 import PdfReader
+import io
+import shutil
+import arxiv  # Import the arxiv package directly
 
-from arxiv import ArxivFetcher
+# Debug: Verify arxiv module is correctly imported
+print(f"ArXiv module imported successfully. Has Search: {hasattr(arxiv, 'Search')}")
+
+from arxiv_fetcher import ArxivFetcher
 from llm import LLMSummarizer
 from database import paper_details_collection
 
@@ -548,6 +556,497 @@ async def generate_bulk_summaries():
             
     except Exception as e:
         print(f"Error in bulk generation: {str(e)}")
+
+@app.post("/api/fetch-arxiv-paper")
+async def fetch_arxiv_paper(request: Request):
+    """
+    Fetch and process a single paper by arXiv ID.
+    This endpoint is used by the frontend to display papers from direct arXiv URLs.
+    """
+    try:
+        # Parse the request body
+        data = await request.json()
+        arxiv_id = data.get("arxiv_id")
+        
+        if not arxiv_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="arXiv ID is required"
+            )
+        
+        # First, check if the paper already exists in our database
+        paper = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: paper_details_collection.find_one({"arxiv_id": arxiv_id})
+        )
+        
+        if paper:
+            # Paper already exists, return it
+            return serialize_mongo_doc(paper)
+        
+        # If not in database, fetch the basic info first
+        if not paper:
+            # Fetch the paper directly using arXiv
+            try:
+                # Use the arxiv library to fetch the paper
+                print(f"Attempting to search for arxiv paper: {arxiv_id}")
+                print(f"ArXiv module type: {type(arxiv)}, has Search: {hasattr(arxiv, 'Search')}")
+                
+                # Use the newer Client API instead of deprecated Search.results()
+                client = arxiv.Client()
+                search = arxiv.Search(id_list=[arxiv_id], max_results=1)
+                papers = list(client.results(search))
+                if not papers:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Paper with arXiv ID '{arxiv_id}' not found"
+                    )
+                paper_obj = papers[0]
+                
+                # Initialize LLM summarizer
+                llm_summarizer = LLMSummarizer(api_key=api_key)
+                
+                # Extract paper information
+                title = paper_obj.title
+                authors = ", ".join([str(author) for author in paper_obj.authors]) if hasattr(paper_obj, "authors") and paper_obj.authors else "Unknown"
+                url = paper_obj.entry_id if hasattr(paper_obj, "entry_id") else f"https://arxiv.org/abs/{arxiv_id}"
+                published_date = paper_obj.published.replace(tzinfo=None) if hasattr(paper_obj, "published") else datetime.datetime.now()
+                abstract = paper_obj.summary if hasattr(paper_obj, "summary") else ""
+                
+                # Get paper category (if available)
+                category_code = None
+                if hasattr(paper_obj, 'categories') and paper_obj.categories:
+                    # categories can be either a list or a string
+                    if isinstance(paper_obj.categories, list):
+                        categories = paper_obj.categories
+                    else:
+                        categories = paper_obj.categories.split()
+                    # Use the first category as the primary one
+                    category_code = categories[0] if categories else None
+                
+                # Generate a slug for the paper
+                slug = slugify(title)
+                
+                # Get the category name
+                arxiv_fetcher = ArxivFetcher()
+                category_name = arxiv_fetcher.get_category_name(category_code) if category_code else "Uncategorized"
+                category_slug = slugify(category_name)
+                
+                # Generate AI summary using LLM
+                print(f"Generating AI summary for paper: {title}")
+                summary_sections = await llm_summarizer.generate_paper_summary(
+                    title=title,
+                    authors=authors,
+                    abstract=abstract,
+                    url=url
+                )
+                
+                # Format the current date
+                current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                
+                # Create the paper document
+                paper_doc = {
+                    "title": title,
+                    "slug": slug,
+                    "authors": authors,
+                    "category_code": category_code if category_code else "unknown",
+                    "category_name": category_name,
+                    "category_slug": category_slug,
+                    "arxiv_id": arxiv_id,
+                    "published_date": published_date,
+                    "url": url,
+                    "summary_sections": summary_sections,
+                    "generation_date": datetime.datetime.now(),
+                    "processed_date": current_date,
+                    "has_pdf_analysis": False
+                }
+                
+                # Save to MongoDB
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: paper_details_collection.insert_one(paper_doc)
+                )
+                
+                paper = serialize_mongo_doc(paper_doc)
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"Error fetching paper {arxiv_id}: {str(e)}")
+                
+                # Provide user-friendly error messages
+                if "sequence item" in str(e) and "Author found" in str(e):
+                    error_msg = "Failed to process paper authors. The paper data format may have changed."
+                elif "Search" in str(e) and "attribute" in str(e):
+                    error_msg = "arXiv library error. Please try again in a moment."
+                elif "not found" in str(e).lower():
+                    error_msg = f"Paper with arXiv ID '{arxiv_id}' was not found."
+                elif "connection" in str(e).lower() or "timeout" in str(e).lower():
+                    error_msg = "Network connection error. Please check your internet connection and try again."
+                else:
+                    error_msg = f"An unexpected error occurred while fetching the paper: {str(e)[:100]}..."
+                    
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error fetching paper: {error_msg}"
+                )
+        else:
+            paper = serialize_mongo_doc(paper)
+            
+        return paper
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+def download_and_analyze_pdf(arxiv_id: str, save_path: str = None) -> Dict[str, Any]:
+    """
+    Download a PDF from arXiv, extract its text, and analyze it.
+    
+    Args:
+        arxiv_id: The arXiv ID of the paper
+        save_path: Optional path to save the PDF file
+    
+    Returns:
+        Dictionary with pdf_path and extracted content
+    """
+    try:
+        # Construct the PDF URL (arXiv convention)
+        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+        
+        # Create the download directory if it doesn't exist
+        if save_path is None:
+            save_path = os.path.join("paper_downloads", f"{arxiv_id}.pdf")
+            
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        print(f"Downloading PDF from {pdf_url} to {save_path}")
+        
+        # Download the PDF using a more robust approach
+        try:
+            # Add request headers to prevent blocking
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            }
+            
+            # Create a request with headers
+            req = urllib.request.Request(pdf_url, headers=headers)
+            
+            # Download with timeout and retry logic
+            max_retries = 3
+            retry_delay = 2  # seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as response:
+                        # Check if the response is actually a PDF (content type)
+                        content_type = response.info().get_content_type()
+                        if 'pdf' not in content_type.lower() and 'application/octet-stream' not in content_type.lower():
+                            print(f"Warning: Expected PDF but got {content_type}")
+                        
+                        # Read the content
+                        pdf_content = response.read()
+                        
+                        # Check if the content is valid (minimum size check)
+                        if len(pdf_content) < 1000:  # PDFs are usually larger than 1KB
+                            raise Exception(f"Downloaded content too small ({len(pdf_content)} bytes), likely not a valid PDF")
+                        
+                        # Save the PDF
+                        with open(save_path, 'wb') as out_file:
+                            out_file.write(pdf_content)
+                        
+                        break  # Success, exit retry loop
+                        
+                except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+                    if attempt < max_retries - 1:
+                        print(f"Download attempt {attempt+1} failed: {str(e)}. Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                    else:
+                        raise Exception(f"Failed to download PDF after {max_retries} attempts: {str(e)}")
+                        
+        except Exception as download_error:
+            print(f"Download error: {str(download_error)}")
+            raise download_error
+            
+        # Extract text from the PDF
+        extracted_text = ""
+        
+        # Use PyPDF2 to extract text - with error handling
+        try:
+            with open(save_path, 'rb') as file:
+                reader = PdfReader(file)
+                num_pages = len(reader.pages)
+                
+                # Make sure we actually have pages
+                if num_pages == 0:
+                    raise Exception("PDF has no pages")
+                
+                # Extract text from each page with error handling
+                for page_num in range(min(num_pages, 20)):  # Limit to first 20 pages
+                    try:
+                        page = reader.pages[page_num]
+                        page_text = page.extract_text()
+                        if page_text:
+                            extracted_text += f"\n--- Page {page_num + 1} ---\n"
+                            extracted_text += page_text
+                    except Exception as page_error:
+                        print(f"Error extracting text from page {page_num+1}: {str(page_error)}")
+                        # Continue with other pages
+                
+                # If we couldn't extract any text, raise exception
+                if not extracted_text.strip():
+                    raise Exception("Could not extract any text from the PDF")
+                    
+        except Exception as extract_error:
+            print(f"PDF extraction error: {str(extract_error)}")
+            raise extract_error
+        
+        return {
+            "pdf_path": save_path,
+            "extracted_text": extracted_text,
+            "num_pages": num_pages
+        }
+        
+    except Exception as e:
+        print(f"Error downloading or extracting PDF: {str(e)}")
+        raise e
+
+@app.post("/api/pdf-analysis/{arxiv_id}")
+async def analyze_pdf_by_arxiv_id(arxiv_id: str):
+    """
+    Download a paper PDF from arXiv, extract its text content,
+    summarize it and return the analysis.
+    """
+    try:
+        paper_data = None
+        use_mongodb = True
+        
+        # Try to get the paper from MongoDB, fall back to direct arXiv fetch if MongoDB fails
+        try:
+            # Check if we already have this paper in the database
+            paper = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: paper_details_collection.find_one({"arxiv_id": arxiv_id})
+            )
+            
+            if paper:
+                paper_data = serialize_mongo_doc(paper)
+        except Exception as db_error:
+            print(f"MongoDB error: {str(db_error)} - Falling back to direct arXiv fetch")
+            use_mongodb = False
+        
+        # If not in database or MongoDB failed, fetch directly from arXiv
+        if not paper_data:
+            # Fetch the paper directly using arXiv
+            try:
+                # Use the arxiv library to fetch the paper
+                print(f"Attempting to search for arxiv paper: {arxiv_id}")
+                print(f"ArXiv module type: {type(arxiv)}, has Search: {hasattr(arxiv, 'Search')}")
+                
+                # Use the newer Client API instead of deprecated Search.results()
+                client = arxiv.Client()
+                search = arxiv.Search(id_list=[arxiv_id], max_results=1)
+                papers = list(client.results(search))
+                if not papers:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Paper with arXiv ID '{arxiv_id}' not found"
+                    )
+                paper_obj = papers[0]
+                
+                # Initialize LLM summarizer
+                llm_summarizer = LLMSummarizer(api_key=api_key)
+                
+                # Extract paper information
+                title = paper_obj.title
+                authors = ", ".join([str(author) for author in paper_obj.authors]) if hasattr(paper_obj, "authors") and paper_obj.authors else "Unknown"
+                url = paper_obj.entry_id if hasattr(paper_obj, "entry_id") else f"https://arxiv.org/abs/{arxiv_id}"
+                published_date = paper_obj.published.replace(tzinfo=None) if hasattr(paper_obj, "published") else datetime.datetime.now()
+                abstract = paper_obj.summary if hasattr(paper_obj, "summary") else ""
+                
+                # Get paper category (if available)
+                category_code = None
+                if hasattr(paper_obj, 'categories') and paper_obj.categories:
+                    # categories can be either a list or a string
+                    if isinstance(paper_obj.categories, list):
+                        categories = paper_obj.categories
+                    else:
+                        categories = paper_obj.categories.split()
+                    # Use the first category as the primary one
+                    category_code = categories[0] if categories else None
+                
+                # Generate a slug for the paper
+                slug = slugify(title)
+                
+                # Get the category name
+                arxiv_fetcher = ArxivFetcher()
+                category_name = arxiv_fetcher.get_category_name(category_code) if category_code else "Uncategorized"
+                category_slug = slugify(category_name)
+                
+                # Generate AI summary using LLM
+                print(f"Generating AI summary for paper: {title}")
+                summary_sections = await llm_summarizer.generate_paper_summary(
+                    title=title,
+                    authors=authors,
+                    abstract=abstract,
+                    url=url
+                )
+                
+                # Format the current date
+                current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                
+                # Create the paper document
+                paper_doc = {
+                    "title": title,
+                    "slug": slug,
+                    "authors": authors,
+                    "category_code": category_code if category_code else "unknown",
+                    "category_name": category_name,
+                    "category_slug": category_slug,
+                    "arxiv_id": arxiv_id,
+                    "published_date": published_date,
+                    "url": url,
+                    "summary_sections": summary_sections,
+                    "generation_date": datetime.datetime.now(),
+                    "processed_date": current_date,
+                    "has_pdf_analysis": False
+                }
+                
+                # Save to MongoDB if it's available
+                if use_mongodb:
+                    try:
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: paper_details_collection.insert_one(paper_doc)
+                        )
+                    except Exception as save_error:
+                        print(f"Error saving to MongoDB: {str(save_error)}")
+                        # Continue without saving to MongoDB
+                
+                paper_data = paper_doc if not use_mongodb else serialize_mongo_doc(paper_doc)
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"Error fetching paper {arxiv_id}: {str(e)}")
+                
+                # Provide user-friendly error messages
+                if "sequence item" in str(e) and "Author found" in str(e):
+                    error_msg = "Failed to process paper authors. The paper data format may have changed."
+                elif "Search" in str(e) and "attribute" in str(e):
+                    error_msg = "arXiv library error. Please try again in a moment."
+                elif "not found" in str(e).lower():
+                    error_msg = f"Paper with arXiv ID '{arxiv_id}' was not found."
+                elif "connection" in str(e).lower() or "timeout" in str(e).lower():
+                    error_msg = "Network connection error. Please check your internet connection and try again."
+                else:
+                    error_msg = f"An unexpected error occurred while fetching the paper: {str(e)[:100]}..."
+                    
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error fetching paper: {error_msg}"
+                )
+            
+        # Check if we've already analyzed the PDF
+        if paper_data.get("pdf_analysis"):
+            return {
+                "paper": paper_data,
+                "pdf_analysis": paper_data.get("pdf_analysis")
+            }
+            
+        # Download and extract text from the PDF
+        save_path = os.path.join("paper_downloads", f"{arxiv_id}.pdf")
+        
+        try:
+            pdf_result = await asyncio.to_thread(download_and_analyze_pdf, arxiv_id, save_path)
+        except Exception as pdf_error:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error downloading or analyzing PDF: {str(pdf_error)}"
+            )
+        
+        # Initialize LLM summarizer
+        llm_summarizer = LLMSummarizer(api_key=api_key)
+        
+        # Generate a summary of the PDF content
+        print(f"Generating PDF summary for arXiv ID: {arxiv_id}")
+        
+        # Extract a subset of the text for summarization (to avoid token limits)
+        extract_text_sample = pdf_result["extracted_text"][:10000]  # First 10K chars
+        
+        try:
+            # Generate summary using the LLM
+            pdf_summary = await llm_summarizer.generate_pdf_summary(
+                title=paper_data["title"],
+                authors=paper_data["authors"],
+                pdf_text=extract_text_sample
+            )
+        except Exception as summary_error:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating PDF summary: {str(summary_error)}"
+            )
+        
+        # Create the PDF analysis object
+        pdf_analysis = {
+            "pdf_path": pdf_result["pdf_path"],
+            "num_pages": pdf_result["num_pages"],
+            "summary": pdf_summary,
+            "analysis_date": datetime.datetime.now().isoformat()
+        }
+        
+        # Update the paper document with the PDF analysis if MongoDB is available
+        if use_mongodb:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: paper_details_collection.update_one(
+                        {"arxiv_id": arxiv_id},
+                        {"$set": {
+                            "pdf_analysis": pdf_analysis,
+                            "has_pdf_analysis": True
+                        }}
+                    )
+                )
+            except Exception as update_error:
+                print(f"Error updating MongoDB: {str(update_error)}")
+                # Continue without updating MongoDB
+        
+        # Update the paper object with the PDF analysis
+        paper_data["pdf_analysis"] = pdf_analysis
+        paper_data["has_pdf_analysis"] = True
+        
+        return {
+            "paper": paper_data,
+            "pdf_analysis": pdf_analysis
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error analyzing PDF: {str(e)}")
+        
+        # Provide user-friendly error messages
+        if "coroutine" in str(e) and "subscriptable" in str(e):
+            error_msg = "Internal async processing error. The system is being updated to fix this issue."
+        elif "PDF" in str(e) and ("download" in str(e) or "extract" in str(e)):
+            error_msg = "Failed to download or process the PDF file. The paper may not have a PDF available."
+        elif "timeout" in str(e).lower() or "connection" in str(e).lower():
+            error_msg = "Network timeout while downloading PDF. Please try again later."
+        elif "not found" in str(e).lower():
+            error_msg = f"Paper with arXiv ID '{arxiv_id}' was not found."
+        else:
+            error_msg = f"An unexpected error occurred during PDF analysis: {str(e)[:100]}..."
+            
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error analyzing PDF: {error_msg}"
+        )
 
 def main():
     """Command line interface for the arXiv summarizer."""

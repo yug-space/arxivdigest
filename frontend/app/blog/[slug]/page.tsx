@@ -2,17 +2,20 @@
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Calendar, Share2 } from "lucide-react"
+import { ArrowLeft, Calendar, FileText, Share2, Download } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
 import ReactMarkdown from 'react-markdown'
 import { useEffect, useState } from 'react'
 import apiEndpoints, { Paper } from '@/lib/api'
+import axios from 'axios'
 
 export default function BlogPage({ params }: { params: { slug: string } }) {
   const [paper, setPaper] = useState<Paper | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pdfAnalysis, setPdfAnalysis] = useState<any>(null);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
 
   useEffect(() => {
     const fetchPaper = async () => {
@@ -20,6 +23,12 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
         setLoading(true);
         const response = await apiEndpoints.getPaperBySlug(params.slug);
         setPaper(response.data);
+        
+        // If paper already has PDF analysis, load it
+        if (response.data.has_pdf_analysis && response.data.pdf_analysis) {
+          setPdfAnalysis(response.data.pdf_analysis);
+        }
+        
         setError(null);
       } catch (e: any) {
         console.error('Error fetching paper:', e);
@@ -31,6 +40,43 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
 
     fetchPaper();
   }, [params.slug]);
+
+  const handleAnalyzePDF = async () => {
+    if (!paper) return;
+    
+    try {
+      setAnalyzeLoading(true);
+      
+      // Call the new PDF analysis endpoint
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_URL || 'http://localhost:8000'}/api/pdf-analysis/${paper.arxiv_id}`,
+        {},
+        {
+          // Increase timeout for the PDF analysis request
+          timeout: 120000, // 2 minutes
+        }
+      );
+      
+      if (response.data && response.data.pdf_analysis) {
+        setPdfAnalysis(response.data.pdf_analysis);
+        
+        // Update paper object with PDF analysis
+        setPaper({
+          ...paper,
+          has_pdf_analysis: true,
+          pdf_analysis: response.data.pdf_analysis
+        });
+      } else {
+        throw new Error('PDF analysis response is missing expected data');
+      }
+    } catch (e: any) {
+      console.error('Error analyzing PDF:', e);
+      const errorMessage = e.response?.data?.detail || e.message || 'Unknown error occurred';
+      alert(`Failed to analyze PDF: ${errorMessage}. Please try again later.`);
+    } finally {
+      setAnalyzeLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -84,15 +130,53 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
             <h2 className="text-xl font-semibold mb-2">Summary</h2>
             <ReactMarkdown>{paper.summary_sections}</ReactMarkdown>
           </div>
+          
+          {/* PDF Analysis section */}
+          <div className="mt-8 mb-6">
+          
+            
+            {pdfAnalysis && (
+              <div className="mt-4">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Analyzed on {new Date(pdfAnalysis.analysis_date).toLocaleDateString()} • 
+                  {pdfAnalysis.num_pages} pages
+                </p>
+                <div className="bg-gray-800 p-4 rounded-md mt-2">
+                  <ReactMarkdown>{pdfAnalysis.summary}</ReactMarkdown>
+                </div>
+              </div>
+            )}
+            
+            {!pdfAnalysis && !analyzeLoading && (
+              <p className="text-muted-foreground mt-2">
+                Click 'Analyze Full Paper' to extract and analyze the full PDF content.
+              </p>
+            )}
+          </div>
 
           {/* Display link to original paper */}
           <div className="mt-8 mb-6">
             <h2 className="text-2xl font-semibold mb-4">Original Paper</h2>
-            <p className="mb-4">
-              <a href={paper.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">
+            <div className="flex flex-col gap-2">
+              <a 
+                href={paper.url} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-blue-400 hover:text-blue-300 flex items-center gap-2"
+              >
+                <ArrowLeft className="h-4 w-4" />
                 View on arXiv
               </a>
-            </p>
+              <a 
+                href={`https://arxiv.org/pdf/${paper.arxiv_id}.pdf`} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-blue-400 hover:text-blue-300 flex items-center gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Download PDF
+              </a>
+            </div>
           </div>
 
           <div className="mt-8 mb-6">
