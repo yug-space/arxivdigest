@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, Calendar, Download } from "lucide-react"
 import Link from "next/link"
 import axios from 'axios'
+import api from '@/lib/api'
 
 // Define an interface for the paper data
 interface Paper {
@@ -69,11 +70,7 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
       setProcessingStatus('fetching')
       
       // Call our backend to fetch the paper
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_URL || 'http://localhost:8000'}/api/fetch-arxiv-paper`,
-        { arxiv_id: paperArxivId },
-        { timeout: 60000 } // 60 seconds timeout
-      )
+      const response = await api.fetchArxivPaper({ arxiv_id: paperArxivId })
       
       return response.data
     } catch (error: any) {

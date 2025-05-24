@@ -105,6 +105,10 @@ export const apiEndpoints = {
     };
     timestamp: string;
   }>('/generation-status', { params }),
+
+  fetchArxivPaper: (params?: {
+    arxiv_id: string;
+  }) => api.post<Paper>('/fetch-arxiv-paper', { params }),
 };
 
 // Error handling interceptor
