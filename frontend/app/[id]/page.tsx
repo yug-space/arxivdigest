@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Calendar, Share2, Download, FileText } from "lucide-react"
+import { ArrowLeft, Calendar, Download } from "lucide-react"
 import Link from "next/link"
 import axios from 'axios'
 
