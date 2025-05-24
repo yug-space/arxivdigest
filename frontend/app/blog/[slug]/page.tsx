@@ -81,7 +81,7 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-[50vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-foreground"></div>
       </div>
     );
   }
@@ -118,7 +118,7 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
 
         <h1 className="text-3xl font-bold tracking-tight mb-4">{paper.title}</h1>
 
-        <div className="prose prose-invert max-w-none">
+        <div className="prose max-w-none">
           {/* Authors section */}
           <div className="mb-6">
             <h2 className="text-xl font-semibold mb-2">Authors</h2>
@@ -141,17 +141,13 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
                   Analyzed on {new Date(pdfAnalysis.analysis_date).toLocaleDateString()} • 
                   {pdfAnalysis.num_pages} pages
                 </p>
-                <div className="bg-gray-800 p-4 rounded-md mt-2">
+                <div className="bg-muted p-4 rounded-md mt-2 border border-border">
                   <ReactMarkdown>{pdfAnalysis.summary}</ReactMarkdown>
                 </div>
               </div>
             )}
             
-            {!pdfAnalysis && !analyzeLoading && (
-              <p className="text-muted-foreground mt-2">
-                Click 'Analyze Full Paper' to extract and analyze the full PDF content.
-              </p>
-            )}
+            
           </div>
 
           {/* Display link to original paper */}
@@ -162,7 +158,7 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
                 href={paper.url} 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="text-blue-400 hover:text-blue-300 flex items-center gap-2"
+                className="text-primary hover:text-primary/80 flex items-center gap-2"
               >
                 <ArrowLeft className="h-4 w-4" />
                 View on arXiv
@@ -171,7 +167,7 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
                 href={`https://arxiv.org/pdf/${paper.arxiv_id}.pdf`} 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="text-blue-400 hover:text-blue-300 flex items-center gap-2"
+                className="text-primary hover:text-primary/80 flex items-center gap-2"
               >
                 <Download className="h-4 w-4" />
                 Download PDF
@@ -180,7 +176,7 @@ export default function BlogPage({ params }: { params: { slug: string } }) {
           </div>
 
           <div className="mt-8 mb-6">
-            <p className="mb-4">Go back to <Link href="/" className="text-blue-400 hover:text-blue-300">home</Link></p>
+            <p className="mb-4">Go back to <Link href="/" className="text-primary hover:text-primary/80">home</Link></p>
           </div>
         </div>
       </div>

@@ -61,7 +61,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-[50vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-foreground"></div>
       </div>
     );
   }
@@ -102,7 +102,7 @@ export default function CategoryPage({ params }: { params: { slug: string } }) {
       <div className="flex flex-col gap-4">
         {papers.map((paper) => (
           <Link href={`/blog/${paper.slug}`} key={paper._id}>
-            <Card className="h-full overflow-hidden backdrop-blur-sm bg-card/50 border-muted/40 transition-all hover:shadow-md hover:shadow-primary/5 hover:border-muted/60">
+            <Card className="h-full overflow-hidden backdrop-blur-sm   transition-all hover:shadow-md hover:shadow-primary/5 hover:border-muted/60">
               <div className="p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <Badge variant="outline" className="bg-background/50">

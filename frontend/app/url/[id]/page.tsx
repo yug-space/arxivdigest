@@ -11,12 +11,13 @@ import axios from 'axios'
 interface Paper {
   title: string;
   authors: string;
-  summary: string;
-  published: string;
+  summary_sections?: string;
+  published_date?: string;
   url: string;
-  category?: string;
-  categoryName?: string;
+  category_code?: string;
+  category_name?: string;
   arxiv_id?: string;
+  slug?: string;
 }
 
 interface PdfAnalysis {
@@ -37,7 +38,6 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
 
   // Extract arXiv ID from URL
   const getArxivIdFromParams = (paramId: string): string => {
-    // URL will be in the format "https://arxiv.org/abs/2505.14669v1" or just the ID
     try {
       // First decode the URL parameter
       let decodedUrl = decodeURIComponent(paramId)
@@ -63,95 +63,23 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // Helper function to extract text from XML
-  const extractTextFromXml = (xmlString: string, selector: string): string => {
-    // Simple regex-based extractor for XML elements
-    // This is a simplistic approach; in production, you'd use a proper XML parser
-    const regex = new RegExp(`<${selector}[^>]*>(.*?)<\/${selector}>`, 's')
-    const match = xmlString.match(regex)
-    return match ? match[1].trim() : ''
-  }
-
-  // Function to fetch the paper directly from arXiv API
-  const fetchPaperFromArxiv = async (paperArxivId: string) => {
+  // Function to fetch the paper from our backend
+  const fetchPaperFromBackend = async (paperArxivId: string) => {
     try {
       setProcessingStatus('fetching')
       
-      // Use the arXiv API to fetch the paper
-      const response = await axios.get(`https://export.arxiv.org/api/query?id_list=${paperArxivId}`)
-      const xmlString = response.data
+      // Call our backend to fetch the paper
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_URL || 'http://localhost:8000'}/api/fetch-arxiv-paper`,
+        { arxiv_id: paperArxivId },
+        { timeout: 60000 } // 60 seconds timeout
+      )
       
-      // Check if we got a valid response
-      if (!xmlString.includes('<entry>')) {
-        throw new Error('Paper not found')
-      }
-      
-      // Extract the entry section
-      const entryMatch = xmlString.match(/<entry>([\s\S]*?)<\/entry>/)
-      if (!entryMatch) {
-        throw new Error('Paper entry not found in response')
-      }
-      
-      const entryXml = entryMatch[0]
-      
-      // Extract paper details using our helper function
-      const title = extractTextFromXml(entryXml, 'title')
-      const summary = extractTextFromXml(entryXml, 'summary')
-      const published = extractTextFromXml(entryXml, 'published')
-      const url = extractTextFromXml(entryXml, 'id')
-      
-      // Extract authors - this is more complex
-      const authorMatches = entryXml.match(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>[\s\S]*?<\/author>/g)
-      const authors = authorMatches 
-        ? authorMatches
-            .map((author: string) => {
-              const nameMatch = author.match(/<name>([\s\S]*?)<\/name>/)
-              return nameMatch ? nameMatch[1].trim() : null
-            })
-            .filter(Boolean)
-            .join(', ')
-        : 'Unknown'
-      
-      // Extract category
-      let category = ''
-      let categoryName = 'Research Paper'
-      
-      const categoryMatch = entryXml.match(/<category term="([^"]*)"/)
-      if (categoryMatch) {
-        category = categoryMatch[1]
-        // Map category codes to human-readable names (simplified)
-        const categoryMap: {[key: string]: string} = {
-          'cs.LG': 'Machine Learning',
-          'cs.CL': 'Natural Language Processing',
-          'cs.CV': 'Computer Vision',
-          'stat.ML': 'Statistical ML',
-          'quant-ph': 'Quantum Physics',
-          'nucl-th': 'Nuclear Theory',
-          'nucl-ex': 'Nuclear Experiment',
-          'cond-mat.mtrl-sci': 'Materials Science',
-          'astro-ph.GA': 'Galaxy Astrophysics',
-          'q-bio.NC': 'Neurons & Cognition',
-          'cs.CR': 'Crypto & Security'
-        }
-        categoryName = categoryMap[category] || category
-      }
-      
-      // Create the paper object
-      const paperData: Paper = {
-        title,
-        authors,
-        summary,
-        published,
-        url,
-        category,
-        categoryName,
-        arxiv_id: paperArxivId
-      }
-      
-      return paperData
-    } catch (error) {
-      console.error('Error fetching from arXiv:', error)
-      throw error
+      return response.data
+    } catch (error: any) {
+      console.error('Error fetching from backend:', error)
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to fetch paper'
+      throw new Error(errorMessage)
     }
   }
 
@@ -166,7 +94,6 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
         `${process.env.NEXT_PUBLIC_URL || 'http://localhost:8000'}/api/pdf-analysis/${paper.arxiv_id}`,
         {},
         {
-          // Increase timeout for the PDF analysis request
           timeout: 120000, // 2 minutes
         }
       );
@@ -199,13 +126,13 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
       try {
         setLoading(true);
         
-        // Fetch paper from arXiv
-        const paperData = await fetchPaperFromArxiv(arxivId);
+        // Fetch paper from our backend
+        const paperData = await fetchPaperFromBackend(arxivId);
         setPaper(paperData);
         setProcessingStatus('complete');
       } catch (e: any) {
         console.error('Error processing paper:', e);
-        setError(e.response?.data?.detail || e.message || 'Failed to fetch paper. Please try again later.');
+        setError(e.message || 'Failed to fetch paper. Please try again later.');
         setProcessingStatus('error');
       } finally {
         setLoading(false);
@@ -226,9 +153,9 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
   if (loading) {
     return (
       <div className="flex flex-col justify-center items-center min-h-[50vh] p-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900 mb-4"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-foreground mb-4"></div>
         <p className="text-muted-foreground text-center">
-          {processingStatus === 'fetching' ? 'Fetching paper from arXiv...' :
+          {processingStatus === 'fetching' ? 'Fetching paper from backend...' :
            processingStatus === 'processing' ? 'Processing paper...' :
            'Loading...'}
         </p>
@@ -252,36 +179,48 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
     )
   }
 
+  // Format the published date
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return 'Unknown date';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-US', {
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric'
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   return (
     <div className="flex flex-col gap-8 p-4">
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center gap-2 mb-4">
           <Badge variant="outline" className="bg-background/50">
-            {paper.categoryName}
+            {paper.category_name || 'Research Paper'}
           </Badge>
           <div className="flex items-center text-sm text-muted-foreground">
             <Calendar className="mr-1 h-4 w-4" />
-            {new Date(paper.published).toLocaleDateString('en-US', {
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric'
-            })}
+            {formatDate(paper.published_date)}
           </div>
         </div>
 
         <h1 className="text-3xl font-bold tracking-tight mb-4">{paper.title}</h1>
 
-        <div className="prose prose-invert max-w-none">
+        <div className="prose max-w-none">
           {/* Authors section */}
           <div className="mb-6">
             <h2 className="text-xl font-semibold mb-2">Authors</h2>
-            <p>{paper.authors}</p>
+            <p>{paper.authors || 'Unknown authors'}</p>
           </div>
 
           {/* Summary section */}
           <div className="mb-6">
-            <h2 className="text-xl font-semibold mb-2">Abstract</h2>
-            <p className="whitespace-pre-line">{paper.summary}</p>
+            <h2 className="text-xl font-semibold mb-2">Summary</h2>
+            <div className="whitespace-pre-line bg-muted p-4 rounded-md border border-border">
+              {paper.summary_sections || 'No summary available'}
+            </div>
           </div>
           
           {/* PDF Analysis section */}
@@ -291,7 +230,7 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
                 <h2 className="text-2xl font-semibold">PDF Analysis</h2>
                 {!pdfAnalysis && analyzeLoading && (
                   <div className="flex items-center gap-2">
-                    <div className="animate-spin h-4 w-4 border-t-2 border-b-2 border-gray-900 rounded-full"></div>
+                    <div className="animate-spin h-4 w-4 border-t-2 border-b-2 border-foreground rounded-full"></div>
                     <span>Analyzing PDF (this may take a minute)...</span>
                   </div>
                 )}
@@ -303,16 +242,16 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
                     Analyzed on {new Date(pdfAnalysis.analysis_date).toLocaleDateString()} • 
                     {pdfAnalysis.num_pages} pages
                   </p>
-                  <div className="bg-gray-800 p-4 rounded-md mt-2">
+                  <div className="bg-muted p-4 rounded-md mt-2 border border-border">
                     <div className="whitespace-pre-line">{pdfAnalysis.summary}</div>
                   </div>
                 </div>
               )}
               
               {!pdfAnalysis && analyzeLoading && (
-                <div className="mt-4 p-4 border border-gray-700 rounded-md">
+                <div className="mt-4 p-4 border border-border rounded-md">
                   <div className="flex flex-col items-center gap-2 text-center">
-                    <div className="animate-spin h-8 w-8 border-t-2 border-b-2 border-gray-900 rounded-full"></div>
+                    <div className="animate-spin h-8 w-8 border-t-2 border-b-2 border-foreground rounded-full"></div>
                     <p>Downloading and analyzing PDF content...</p>
                     <p className="text-sm text-muted-foreground">This may take 1-2 minutes for large papers</p>
                   </div>
@@ -325,7 +264,7 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
           <div className="mt-8 mb-6">
             <h2 className="text-2xl font-semibold mb-2">Original Paper</h2>
             <div className="flex flex-col gap-2">
-              <a href={paper.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 flex items-center gap-2">
+              <a href={paper.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80 flex items-center gap-2">
                 <ArrowLeft className="h-4 w-4" />
                 View on arXiv
               </a>
@@ -334,7 +273,7 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
                   href={`https://arxiv.org/pdf/${paper.arxiv_id}.pdf`} 
                   target="_blank" 
                   rel="noopener noreferrer" 
-                  className="text-blue-400 hover:text-blue-300 flex items-center gap-2"
+                  className="text-primary hover:text-primary/80 flex items-center gap-2"
                 >
                   <Download className="h-4 w-4" />
                   Download PDF
@@ -344,7 +283,7 @@ export default function ArxivUrlPage({ params }: { params: { id: string } }) {
           </div>
 
           <div className="mt-8 mb-6">
-            <p className="mb-4">Go back to <Link href="/" className="text-blue-400 hover:text-blue-300">home</Link></p>
+            <p className="mb-4">Go back to <Link href="/" className="text-primary hover:text-primary/80">home</Link></p>
           </div>
         </div>
       </div>

@@ -61,14 +61,14 @@ export function CategoryList() {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-foreground"></div>
       </div>
     );
   }
 
   if (error && categories.length === 0) {
     return (
-      <div className="text-center py-4 text-red-500">
+      <div className="text-center py-4 text-destructive">
         Error: {error}
       </div>
     );
@@ -77,7 +77,7 @@ export function CategoryList() {
   return (
     <div className="flex flex-col gap-4">
       {generationStatus && (
-        <div className="text-center py-2 text-yellow-500 bg-yellow-500/10 rounded-md">
+        <div className="text-center py-2 text-foreground bg-muted rounded-md border border-border">
           {generationStatus}
         </div>
       )}
@@ -95,7 +95,7 @@ export function CategoryList() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredCategories.map((category) => (
           <Link href={`/category/${category.slug}`} key={category.code}>
-            <Card className="h-full overflow-hidden backdrop-blur-sm bg-card/50 border-muted/40 transition-all hover:shadow-md hover:shadow-primary/5 hover:border-muted/60">
+            <Card className="h-full overflow-hidden backdrop-blur-sm  transition-all hover:shadow-md hover:shadow-primary/5 hover:border-muted/60">
               <div className="p-6">
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-xl">

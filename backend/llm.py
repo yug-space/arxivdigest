@@ -1,4 +1,5 @@
 import openai
+from openai import OpenAI
 import os
 from typing import List, Dict, Any
 from pathlib import Path
@@ -18,8 +19,13 @@ class LLMSummarizer:
             if not self.api_key:
                 raise ValueError("OpenAI API key not provided and not found in environment variables")
         
-        # Use the simpler old-style API to avoid proxy issues
-        openai.api_key = self.api_key
+        # Initialize the OpenAI client with the new API
+        try:
+            self.client = OpenAI(api_key=self.api_key)
+        except Exception as e:
+            print(f"Error initializing OpenAI client: {str(e)}")
+            raise e
+            
         self.model = "gpt-4o-mini"  # Using GPT-4o-mini as specified
         self.executor = ThreadPoolExecutor(max_workers=5)  # For CPU-bound tasks
     
@@ -97,7 +103,7 @@ Only output the scores and explanations, nothing else."""
             # Run OpenAI API call in thread pool
             response = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
-                lambda: openai.ChatCompletion.create(
+                lambda: self.client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "You are a research expert who evaluates paper significance."},
@@ -175,7 +181,7 @@ Only output the scores and explanations, nothing else."""
             # Run OpenAI API call in thread pool
             response = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
-                lambda: openai.ChatCompletion.create(
+                lambda: self.client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "You are a research expert who provides detailed paper analysis."},
@@ -279,7 +285,7 @@ Only output the scores and explanations, nothing else."""
         try:
             response = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
-                lambda: openai.ChatCompletion.create(
+                lambda: self.client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "You are a research expert who synthesizes academic papers into accessible summaries."},
@@ -335,7 +341,7 @@ Only output the scores and explanations, nothing else."""
             # Run OpenAI API call in thread pool
             response = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
-                lambda: openai.ChatCompletion.create(
+                lambda: self.client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "You are a research expert who analyzes academic papers in detail."},
